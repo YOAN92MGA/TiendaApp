@@ -1,0 +1,13 @@
+
+=== TIQUE DE VENTA ===
+Fecha: 2026-04-08 08:52:16
+Venta #: 1
+Atendido por: admin
+------------------------
+Carne x10 = 12000.00 CUP
+Leche x5 = 13000.00 CUP
+------------------------
+Total: 25000.00 CUP
+Método: Efectivo
+Vuelto: 0.00 CUP
+¡Gracias por su compra!

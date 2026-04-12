@@ -1,0 +1,12 @@
+
+=== TIQUE DE VENTA ESPECIAL ===
+Fecha: 2026-04-07 13:57:00
+Venta #: 1
+Atendido por: admin
+------------------------
+Leche x1 = 2600.00 CUP
+------------------------
+Total: 2600.00 CUP
+Método: Efectivo
+Vuelto: 0.00 CUP
+¡Gracias por su compra!

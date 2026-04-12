@@ -1,0 +1,12 @@
+
+=== TIQUE DE VENTA ===
+Fecha: 2026-04-02 13:01:50
+Venta #: 2
+Atendido por: admin
+------------------------
+Arroz x10 = 7000.00 CUP
+------------------------
+Total: 7000.00 CUP
+Metodo: Efectivo
+Vuelto: 1000.00 CUP
+¡Gracias por su compra!
