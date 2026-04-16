@@ -29,6 +29,11 @@ class WarehouseWindow(QWidget):
         self.usd_rate_input.setFixedWidth(100)
         self.refresh_btn = QPushButton("Actualizar")
         self.refresh_btn.setStyleSheet("background-color: #AEDFF7; border-radius: 5px;")
+        
+        self.usd_btn = QPushButton("?? Actualizar tasas USD/EUR")
+        self.usd_btn.clicked.connect(self.update_rates)
+        # Agrega el botón a algún layout (por ejemplo, en la barra superior)
+        
         self.refresh_btn.clicked.connect(self.load_data)
         rate_layout.addWidget(self.usd_rate_input)
         rate_layout.addWidget(self.refresh_btn)
@@ -50,6 +55,10 @@ class WarehouseWindow(QWidget):
         self.setLayout(main_layout)
         self.load_data()
 
+    def update_rates(self):
+        from ui.usd_rate_dialog import UsdRateDialog
+        dialog = UsdRateDialog(self.db, self)
+        dialog.exec()
     def load_data(self):
         # Obtener tipo de cambio (si no hay, usar 1)
         usd_rate_text = self.usd_rate_input.text()

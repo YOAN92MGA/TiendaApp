@@ -14,3 +14,6 @@ class CompanySettings(Base):
     tax_rate = Column(Float, default=0.0)  # impuesto general (ej. 10.0 = 10%)
     receipt_footer = Column(Text, default="¡Gracias por su compra!")
     currency = Column(String(10), default="CUP")
+    # Añadir estas líneas dentro de la clase
+    usd_rate = Column(Float, default=500.0)
+    eur_rate = Column(Float, default=550.0)

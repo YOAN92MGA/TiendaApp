@@ -205,9 +205,61 @@ def register_sale(db: Session, items: List[Dict], payment_method: str,
         amount=total,
         currency="CUP",
         description=f"Venta #{sale.id} - {payment_method}",
-        reference_id=sale.id
+        reference_id=sale.id,
+        user_id=user_id   
     )
-
+def process_return(db: Session, sale_id: int, items: List[Dict], admin_user_id: int) -> int:
+    """
+    Procesa la devolución de productos de una venta.
+    items: lista de {"batch_id": int, "quantity": int}
+    """
+    sales_floor = db.query(StockLocation).filter(StockLocation.name == "Piso").first()
+    if not sales_floor:
+        raise Exception("Ubicación 'Piso' no encontrada")
+    
+    # Obtener la venta original
+    sale = db.query(Sale).filter(Sale.id == sale_id).first()
+    if not sale:
+        raise Exception("Venta no encontrada")
+    
+    for item in items:
+        batch_id = item["batch_id"]
+        quantity = item["quantity"]
+        # Verificar que el lote existe y tiene stock suficiente en piso (opcional, podría devolverse aunque no haya stock físico)
+        stock = db.query(Stock).filter(
+            Stock.batch_id == batch_id,
+            Stock.location_id == sales_floor.id
+        ).first()
+        if stock:
+            stock.quantity += quantity   # Devolver stock al piso
+        else:
+            # Si no existía, crearlo
+            stock = Stock(batch_id=batch_id, location_id=sales_floor.id, quantity=quantity)
+            db.add(stock)
+        
+        # Registrar transacción de devolución (tipo 'return')
+        trans = Transaction(
+            type="return",
+            to_location_id=sales_floor.id,   # se devuelve al piso
+            batch_id=batch_id,
+            quantity=quantity,
+            user_id=admin_user_id,
+            notes=f"Devolución de venta #{sale_id}"
+        )
+        db.add(trans)
+    
+    # Opcional: ajustar el total de la venta original o crear un registro de devolución
+    # Por simplicidad, solo actualizamos stock y transacciones
+    # Después de db.add(sale) y antes de db.commit()
+    for item in items_for_sale:
+        sale_item = SaleItem(
+            sale_id=sale.id,
+            batch_id=item["batch_id"],
+            quantity=item["quantity"],
+            price=item["price"]
+        )
+    db.add(sale_item)
+   
     db.commit()
     db.refresh(sale)
     return sale.id

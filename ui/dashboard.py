@@ -24,6 +24,8 @@ from PySide6.QtWidgets import QLabel
 from ui.company_config_window import CompanyConfigWindow
 from ui.cash_register_window import CashRegisterWindow
 from ui.sync_window import SyncWindow
+from ui.cash_close_window import CashCloseWindow
+from ui.profit_window import ProfitWindow
 
 class Dashboard(QWidget):
     def __init__(self, db, user):
@@ -79,6 +81,7 @@ class Dashboard(QWidget):
             ("🔄 Transferencias", "transfer", "admin"),
             ("🏚️ Almacén", "warehouse", "admin"),
             ("💰 Gastos", "expenses", "admin"),
+            ("📈 Utilidades", "profit", "admin"),
             ("📊 Inventario", "inventory", "admin"),
             ("⭐ Especiales", "specials", "admin"),
             ("📈 Reportes", "reports", "admin"),
@@ -88,6 +91,7 @@ class Dashboard(QWidget):
             ("⚙️ Configuración", "company", "admin"),
             ("💰 Gestión de cajas", "cash", "admin"),
             ("🔄 Sincronización", "sync", "admin"),
+            ("🔒 Cerrar caja", "cashclose", "admin"),
         ]
         
         # Filtrar según rol del usuario
@@ -172,7 +176,8 @@ class Dashboard(QWidget):
         self.modules["company"] = CompanyConfigWindow(self.db, self.user)
         self.modules["cash"] = CashRegisterWindow(self.db, self.user)
         self.modules["sync"] = SyncWindow(self.db, self.user)
-        
+        self.modules["cashclose"] = CashCloseWindow(self.db, self.user)
+        self.modules["profit"] = ProfitWindow(self.db, self.user)
         for key, module in self.modules.items():
             self.dynamic_area.addWidget(module)
         

@@ -7,7 +7,10 @@ from .transaction import Transaction
 from .sale import Sale
 from .expense import Expense
 from .inventory_count import InventoryCount
-
+from .cash_close import CashClose
+from .cash_movement import CashMovement
+from .cash_register import CashRegister
+from .sale_item import SaleItem
 __all__ = [
     "User",
     "Product",
@@ -18,4 +21,8 @@ __all__ = [
     "Sale",
     "Expense",
     "InventoryCount",
+    'CashClose',
+    'CashMovement',
+    "CashRegister",
+    "SaleItem",
 ]

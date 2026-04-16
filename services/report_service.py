@@ -137,7 +137,12 @@ def get_low_margin_products(db: Session, margin_threshold: float = 30.0, usd_rat
     for batch in batches:
         if batch.purchase_price_cup == 0:
             continue
-        margin = (batch.sale_price - batch.purchase_price_cup) / batch.purchase_price_cup * 100
+        from services.company_service import get_company_settings
+        settings = get_company_settings(db)
+        current_usd_rate = settings.usd_rate or 24.0
+        current_cost_cup = batch.purchase_price_usd * current_usd_rate
+        margin = (batch.sale_price - current_cost_cup) / current_cost_cup * 100
+        
         if margin < margin_threshold:
             product = db.query(Product).filter(Product.id == batch.product_id).first()
             if product:
@@ -154,3 +159,38 @@ def get_low_margin_products(db: Session, margin_threshold: float = 30.0, usd_rat
 def export_to_excel(data: List[Dict], filename: str, sheet_name: str = "Reporte"):
     df = pd.DataFrame(data)
     df.to_excel(filename, sheet_name=sheet_name, index=False)
+def get_daily_profit(db: Session, start_date: date, end_date: date):
+    """
+    Retorna la ganancia diaria (ventas - costo) agrupada por día.
+    """
+    # Ventas diarias
+    sales = get_sales_by_period(db, start_date, end_date)
+    # Costo de ventas diario (sumando el costo de compra de los productos vendidos)
+    # Para simplificar, usamos la tabla Transaction para obtener el costo real
+    # Asumiendo que cada venta tiene su costo asociado en la transacción (total es el precio de venta, no costo)
+    # Necesitamos obtener el costo desde ProductBatch.purchase_price_cup
+    results = db.query(
+        func.date(Transaction.created_at).label("day"),
+        func.sum(Transaction.quantity * ProductBatch.purchase_price_cup).label("total_cost")
+    ).join(ProductBatch, Transaction.batch_id == ProductBatch.id)\
+     .filter(Transaction.type == "sale",
+             Transaction.created_at >= start_date,
+             Transaction.created_at <= end_date)\
+     .group_by(func.date(Transaction.created_at))\
+     .order_by("day").all()
+    
+    cost_dict = {r.day: r.total_cost for r in results}
+    
+    profit_data = []
+    for sale in sales:
+        day = sale["day"]
+        total_sales = sale["total"]
+        total_cost = cost_dict.get(day, 0)
+        profit = total_sales - total_cost
+        profit_data.append({
+            "day": day,
+            "sales": total_sales,
+            "cost": total_cost,
+            "profit": profit
+        })
+    return profit_data

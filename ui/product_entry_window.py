@@ -28,7 +28,8 @@ class ProductEntryWindow(QWidget):
         self.category_input = QComboBox()
         self.category_input.addItems([
             "Calzado", "Liquidos", "Carnicos", "Confituras",
-            "Granos", "Ropas", "Productos Especiales"
+            "Granos", "Ropas", "Productos Especiales", "Piezas de Moto",
+            "Conservas", "Dulces Finos","Lacteos","Mercado"
         ])
         self.price_cup_input = QLineEdit()
         self.price_cup_input.setPlaceholderText("Precio compra CUP")

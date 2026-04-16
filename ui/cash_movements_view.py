@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QHBoxLayout, QDateEdit, QLabel, QMessageBox
+    QHeaderView, QHBoxLayout, QDateEdit, QLabel, QMessageBox, QAbstractItemView
 )
 from PySide6.QtCore import QDate
 from services.cash_service import get_movements_by_register, add_movement

@@ -9,6 +9,7 @@ class Sale(Base):
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=False)
     payment_method = Column(String, nullable=False)  # 'cash', 'zelle', 'transfer'
     total = Column(Float, nullable=False)
+    total_cost = Column(Float, default=0.0) 
     change_given = Column(Float, default=0.0)
     receipt_printed = Column(Integer, default=0)  # booleano
     created_at = Column(DateTime, default=datetime.utcnow)

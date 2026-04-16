@@ -50,6 +50,11 @@ class ReportsWindow(QWidget):
         self.setup_alerts_tab()
         self.tabs.addTab(self.alerts_tab, "⚠️ Alertas")
         
+        # Después de self.tabs.addTab(self.alerts_tab, "⚠️ Alertas")
+        self.profit_daily_tab = QWidget()       
+        self.setup_profit_daily_tab()
+        self.tabs.addTab(self.profit_daily_tab, "📊 Ganancias Diarias")
+        
         # Botón exportar global (opcional)
         export_btn = QPushButton("📎 Exportar todo a Excel")
         export_btn.clicked.connect(self.export_all)
@@ -65,7 +70,72 @@ class ReportsWindow(QWidget):
         
         # Cargar datos iniciales en cada pestaña
         self.refresh_all()
-    
+    def setup_profit_daily_tab(self):
+        layout = QVBoxLayout(self.profit_daily_tab)
+        
+        # Filtros
+        filter_layout = QHBoxLayout()
+        self.profit_start_date = QDateEdit()
+        self.profit_start_date.setDate(QDate.currentDate().addDays(-30))
+        self.profit_start_date.setCalendarPopup(True)
+        self.profit_end_date = QDateEdit()
+        self.profit_end_date.setDate(QDate.currentDate())
+        self.profit_end_date.setCalendarPopup(True)
+        self.refresh_profit_btn = QPushButton("Actualizar")
+        self.refresh_profit_btn.clicked.connect(self.refresh_daily_profit)
+        filter_layout.addWidget(QLabel("Desde:"))
+        filter_layout.addWidget(self.profit_start_date)
+        filter_layout.addWidget(QLabel("Hasta:"))
+        filter_layout.addWidget(self.profit_end_date)
+        filter_layout.addWidget(self.refresh_profit_btn)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+        
+        # Tabla de ganancias diarias
+        self.profit_daily_table = QTableWidget()
+        self.profit_daily_table.setColumnCount(4)
+        self.profit_daily_table.setHorizontalHeaderLabels(["Fecha", "Ventas (CUP)", "Costo (CUP)", "Ganancia (CUP)"])
+        self.profit_daily_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.profit_daily_table)
+        
+        # Gráfico de ganancias
+        self.profit_figure = Figure(figsize=(5, 3))
+        self.profit_canvas = FigureCanvas(self.profit_figure)
+        layout.addWidget(self.profit_canvas)
+        
+        # Cargar datos iniciales
+        self.refresh_daily_profit()
+        
+    def refresh_daily_profit(self):
+        from services.report_service import get_daily_profit
+        start = self.profit_start_date.date().toPython()
+        end = self.profit_end_date.date().toPython()
+        data = get_daily_profit(self.db, start, end)
+        if not data:
+            self.profit_daily_table.setRowCount(1)
+            self.profit_daily_table.setItem(0, 0, QTableWidgetItem("Sin datos"))
+            return
+        self.profit_daily_table.setRowCount(len(data))
+        days = []
+        profits = []
+        for row, d in enumerate(data):
+            self.profit_daily_table.setItem(row, 0, QTableWidgetItem(d["day"]))
+            self.profit_daily_table.setItem(row, 1, QTableWidgetItem(f"{d['sales']:.2f}"))
+            self.profit_daily_table.setItem(row, 2, QTableWidgetItem(f"{d['cost']:.2f}"))
+            self.profit_daily_table.setItem(row, 3, QTableWidgetItem(f"{d['profit']:.2f}"))
+            days.append(d["day"])
+            profits.append(d["profit"])
+        # Graficar
+        self.profit_figure.clear()
+        ax = self.profit_figure.add_subplot(111)
+        ax.bar(days, profits, color='#2ECC71')
+        ax.set_title("Ganancia diaria")
+        ax.set_xlabel("Fecha")
+        ax.set_ylabel("Ganancia (CUP)")
+        ax.tick_params(axis='x', rotation=45)
+        self.profit_figure.tight_layout()
+        self.profit_canvas.draw()    
+        
     def setup_sales_tab(self):
         layout = QVBoxLayout(self.sales_tab)
         

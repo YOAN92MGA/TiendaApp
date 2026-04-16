@@ -12,5 +12,4 @@ class CashRegister(Base):
     is_main = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relación con movimientos (la clase CashMovement está en otro archivo)
     movements = relationship("CashMovement", back_populates="register")

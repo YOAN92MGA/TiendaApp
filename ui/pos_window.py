@@ -1,13 +1,12 @@
-# ui/pos_window.py - Punto de Venta mejorado con impresión térmica
+# ui/pos_window.py - Con pestañas de Ventas y Movimientos de caja
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QAbstractItemView, QSpinBox, QDialog, QDialogButtonBox,
-    QFormLayout, QComboBox, QDoubleSpinBox, QSplitter,
+    QFormLayout, QComboBox, QDoubleSpinBox, QSplitter, QScrollArea, QFrame,
+    QGridLayout, QSizePolicy, QTabWidget
 )
-from PySide6.QtWidgets import QTextEdit, QDialogButtonBox
-
-from PySide6.QtGui import QKeySequence, QColor, QBrush, QShortcut
+from PySide6.QtGui import QKeySequence, QColor, QBrush, QShortcut, QFont
 from PySide6.QtCore import Qt, QEvent
 from sqlalchemy.orm import Session
 from models.product import Product
@@ -15,6 +14,11 @@ from models.batch import ProductBatch
 from models.stock import Stock
 from models.stock_location import StockLocation
 from services.product_service import register_sale
+from services.cash_service import (
+    get_or_create_main_register, register_withdrawal, register_expense,
+    register_currency_purchase, register_remittance, register_zelle_purchase,
+    get_daily_movements
+)
 from datetime import datetime, date
 from sqlalchemy import func
 from models.sale import Sale
@@ -35,14 +39,56 @@ class POSWindow(QWidget):
         self.db = db
         self.user = user
         self.setWindowTitle("Punto de Venta")
+        self.setMinimumSize(1100, 700)
         self.setStyleSheet("background-color: #F5F7FA;")
-        
+
+        # Atributos necesarios
         self.cart = []
+        self.all_products = []
+        self.current_category = "Todos"   # <--- Línea clave
+
+        # Obtener caja principal para movimientos
+        self.cash_register = get_or_create_main_register(db)
+        self.register_id = self.cash_register.id
+
+        # Crear pestañas
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("QTabBar::tab { height: 35px; width: 150px; font-size: 12px; }")
+
+        # Pestaña 1: Ventas (todo el contenido original)
+        self.sales_tab = QWidget()
+        self.setup_sales_tab()
+        self.tabs.addTab(self.sales_tab, "🛒 Ventas")
+
+        # Pestaña 2: Movimientos de caja
+        self.cash_tab = QWidget()
+        self.setup_cash_tab()
+        self.tabs.addTab(self.cash_tab, "💰 Movimientos de caja")
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.tabs)
+        self.setLayout(layout)
+
+        # Inicializar datos de ventas (se ejecutan los mismos métodos que antes)
+        self.load_all_products()
+        self.filter_products()
+        self.update_sales_summary()
+
+    # ------------------------------------------------------------
+    # Pestaña de Ventas (todo tu código original)
+    # ------------------------------------------------------------
+    def setup_sales_tab(self):
+        layout = QVBoxLayout(self.sales_tab)
+
+        # ========== COPIA EXACTA DE TU LAYOUT ORIGINAL ==========
+        # (todo el código que tenías dentro de __init__, excepto la creación de self.tabs)
+        # Asegúrate de que las variables self.cart, self.all_products, self.current_category
+        # ya están definidas en __init__ (sí, están al principio)
         
         main_layout = QHBoxLayout()
         splitter = QSplitter(Qt.Horizontal)
         
-        # Panel izquierdo: productos
+        # PANEL IZQUIERDO: Productos
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         
@@ -51,26 +97,56 @@ class POSWindow(QWidget):
         self.search_input.textChanged.connect(self.filter_products)
         left_layout.addWidget(self.search_input)
         
-        self.products_table = QTableWidget()
-        self.products_table.setColumnCount(6)
-        self.products_table.setHorizontalHeaderLabels(["Código", "Producto", "Precio", "Stock", "Categoría", ""])
-        self.products_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.products_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.products_table.setAlternatingRowColors(True)
-        self.products_table.doubleClicked.connect(self.add_selected_product)
-        left_layout.addWidget(self.products_table)
+        # Categorías
+        categories = ["Todos", "Calzado", "Liquidos", "Carnicos", "Confituras", "Granos", "Ropas", 
+                      "Piezas de Moto", "Conservas", "Dulces Finos", "Lacteos", "Mercado"]
+        category_scroll = QScrollArea()
+        category_scroll.setWidgetResizable(True)
+        category_scroll.setFrameShape(QFrame.NoFrame)
+        category_scroll.setMaximumHeight(60)
+        category_widget = QWidget()
+        category_layout = QHBoxLayout(category_widget)
+        category_layout.setAlignment(Qt.AlignLeft)
+        category_layout.setSpacing(8)
+        self.category_buttons = {}
+        for cat in categories:
+            btn = QPushButton(cat)
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #E0E0E0;
+                    border-radius: 15px;
+                    padding: 5px 12px;
+                }
+                QPushButton:checked {
+                    background-color: #4A90E2;
+                    color: white;
+                }
+            """)
+            btn.clicked.connect(lambda checked, c=cat: self.set_category(c))
+            category_layout.addWidget(btn)
+            self.category_buttons[cat] = btn
+        self.category_buttons["Todos"].setChecked(True)
+        category_scroll.setWidget(category_widget)
+        left_layout.addWidget(category_scroll)
         
-        btn_layout = QHBoxLayout()
-        add_btn = QPushButton("➕ Agregar seleccionado (Enter)")
-        add_btn.clicked.connect(self.add_selected_product)
+        # Grid de productos
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        self.products_widget = QWidget()
+        self.products_grid = QGridLayout(self.products_widget)
+        self.products_grid.setSpacing(12)
+        self.products_grid.setContentsMargins(10, 10, 10, 10)
+        scroll.setWidget(self.products_widget)
+        left_layout.addWidget(scroll)
+        
         refresh_btn = QPushButton("🔄 Refrescar (F5)")
         refresh_btn.clicked.connect(self.load_all_products)
-        btn_layout.addWidget(add_btn)
-        btn_layout.addWidget(refresh_btn)
-        left_layout.addLayout(btn_layout)
+        left_layout.addWidget(refresh_btn)
         
-        # Panel derecho: carrito
+        # PANEL DERECHO: Carrito
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         
@@ -87,11 +163,12 @@ class POSWindow(QWidget):
         self.cart_table.setHorizontalHeaderLabels(["Producto", "Cantidad", "Precio Unit.", "Subtotal", "Eliminar", "Editar"])
         self.cart_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.cart_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.cart_table.setMinimumHeight(400)
         right_layout.addWidget(self.cart_table)
         
         total_layout = QHBoxLayout()
         self.total_label = QLabel("Total: 0.00 CUP")
-        self.total_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        self.total_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #2C3E50;")
         total_layout.addStretch()
         total_layout.addWidget(self.total_label)
         total_layout.addStretch()
@@ -101,8 +178,12 @@ class POSWindow(QWidget):
         self.clear_cart_btn = QPushButton("🗑️ Limpiar carrito (Ctrl+Q)")
         self.clear_cart_btn.clicked.connect(self.clear_cart)
         self.pay_btn = QPushButton("💰 Pagar (Ctrl+P)")
-        self.pay_btn.setStyleSheet("background-color: #4A90E2; border-radius: 8px; padding: 12px; font-size: 14px;")
+        self.pay_btn.setStyleSheet("background-color: #4A90E2; border-radius: 8px; padding: 12px; font-size: 14px; color: white;")
         self.pay_btn.clicked.connect(self.process_payment)
+        self.return_btn = QPushButton("↩️ Devolución")
+        self.return_btn.setStyleSheet("background-color: #F39C12; border-radius: 8px; padding: 12px; font-size: 14px; color: white;")
+        self.return_btn.clicked.connect(self.open_return_dialog)
+        action_layout.addWidget(self.return_btn)  # dentro del action_layout, junto a pagar y limpiar
         action_layout.addWidget(self.clear_cart_btn)
         action_layout.addWidget(self.pay_btn)
         right_layout.addLayout(action_layout)
@@ -116,51 +197,166 @@ class POSWindow(QWidget):
         
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
-        splitter.setSizes([600, 400])
+        splitter.setSizes([850, 550])
         main_layout.addWidget(splitter)
-        self.setLayout(main_layout)
+        layout.addLayout(main_layout)
         
-        # Atajos de teclado
+        # Atajos de teclado (se mantienen)
         QShortcut(QKeySequence("F2"), self).activated.connect(self.search_input.setFocus)
         QShortcut(QKeySequence("F5"), self).activated.connect(self.load_all_products)
         QShortcut(QKeySequence("Ctrl+Q"), self).activated.connect(self.clear_cart)
         QShortcut(QKeySequence("Ctrl+P"), self).activated.connect(self.process_payment)
-        self.products_table.installEventFilter(self)
-        
-        self.all_products = []
-        self.load_all_products()
-        self.filter_products()
-        self.update_sales_summary()
-    
-    def eventFilter(self, obj, event):
-        if obj == self.products_table and event.type() == QEvent.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                self.add_selected_product()
-                return True
-        return super().eventFilter(obj, event)
-    def show_receipt_dialog(self, receipt_text):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Ticket de venta")
-        dialog.setMinimumSize(400, 500)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # Área de texto para mostrar el ticket
-        text_edit = QTextEdit()
-        text_edit.setPlainText(receipt_text)
-        text_edit.setReadOnly(True)
-        text_edit.setFontFamily("monospace")
-        layout.addWidget(text_edit)
-        
-        # Botones
-        button_box = QDialogButtonBox()
-        print_btn = button_box.addButton("Imprimir", QDialogButtonBox.AcceptRole)
-        close_btn = button_box.addButton("Cerrar", QDialogButtonBox.RejectRole)
-        button_box.accepted.connect(lambda: self.print_receipt(receipt_text) or dialog.accept())
-        button_box.rejected.connect(dialog.reject)
-        layout.addWidget(button_box)
-        
+
+    # ------------------------------------------------------------
+    # Pestaña de Movimientos de caja
+    # ------------------------------------------------------------
+    def open_return_dialog(self):
+        from ui.return_dialog import ReturnDialog
+        dialog = ReturnDialog(self.db, self.user, self)
         dialog.exec()
+    def setup_cash_tab(self):
+        layout = QVBoxLayout(self.cash_tab)
+
+        # Título
+        title = QLabel("Registro de movimientos de caja")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # Botones de movimientos
+        btn_grid = QGridLayout()
+        btn_grid.setSpacing(15)
+
+        self.withdrawal_btn = QPushButton("💰 Extracción de caja")
+        self.expense_btn = QPushButton("💸 Gasto en efectivo")
+        self.usd_btn = QPushButton("💵 Compra de USD")
+        self.eur_btn = QPushButton("💶 Compra de EUR")
+        self.zelle_btn = QPushButton("💳 Pago por Zelle")
+        self.remittance_btn = QPushButton("📲 Remesa recibida")
+
+        buttons = [self.withdrawal_btn, self.expense_btn, self.usd_btn,
+                   self.eur_btn, self.zelle_btn, self.remittance_btn]
+        for i, btn in enumerate(buttons):
+            btn.setMinimumHeight(50)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #4A90E2;
+                    color: white;
+                    border-radius: 10px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #357ABD;
+                }
+            """)
+            btn.clicked.connect(self.open_cash_movement_dialog)
+            btn_grid.addWidget(btn, i//3, i%3)
+
+        layout.addLayout(btn_grid)
+
+        # Tabla de movimientos del día
+        self.movements_table = QTableWidget()
+        self.movements_table.setColumnCount(5)
+        self.movements_table.setHorizontalHeaderLabels(["Hora", "Tipo", "Monto", "Moneda", "Descripción"])
+        self.movements_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.movements_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(QLabel("Últimos movimientos de hoy:"))
+        layout.addWidget(self.movements_table)
+
+        self.refresh_movements_table()
+
+    def open_cash_movement_dialog(self):
+        sender = self.sender()
+        if sender == self.withdrawal_btn:
+            self.register_movement("withdrawal", "Extracción de caja", ask_amount=True, ask_reason=True)
+        elif sender == self.expense_btn:
+            self.register_movement("expense", "Gasto en efectivo", ask_amount=True, ask_reason=True)
+        elif sender == self.usd_btn:
+            self.register_movement("usd_purchase", "Compra de USD", ask_amount=True, ask_rate=True)
+        elif sender == self.eur_btn:
+            self.register_movement("eur_purchase", "Compra de EUR", ask_amount=True, ask_rate=True)
+        elif sender == self.zelle_btn:
+            self.register_movement("zelle", "Pago por Zelle", ask_amount=True)
+        elif sender == self.remittance_btn:
+            self.register_movement("remittance", "Remesa recibida", ask_amount=True)
+
+    def register_movement(self, mov_type, title, ask_amount=False, ask_reason=False, ask_rate=False):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setMinimumWidth(400)
+        layout = QFormLayout()
+        amount_input = QDoubleSpinBox()
+        amount_input.setRange(0, 1000000)
+        amount_input.setPrefix("CUP " if mov_type in ["withdrawal", "expense", "remittance"] else ("USD " if mov_type == "usd_purchase" else "EUR "))
+        amount_input.setMinimumHeight(30)
+        if ask_amount:
+            layout.addRow("Monto:", amount_input)
+        reason_input = QLineEdit()
+        reason_input.setMinimumHeight(30)
+        if ask_reason:
+            layout.addRow("Motivo:", reason_input)
+        rate_input = QDoubleSpinBox()
+        rate_input.setRange(0, 1000)
+        rate_input.setDecimals(2)
+        rate_input.setMinimumHeight(30)
+        if ask_rate:
+            layout.addRow("Tasa de cambio (CUP/divisa):", rate_input)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        dialog.setLayout(layout)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        amount = amount_input.value()
+        if ask_reason:
+            reason = reason_input.text()
+            if not reason:
+                QMessageBox.warning(self, "Error", "Debe especificar el motivo.")
+                return
+        try:
+            if mov_type == "withdrawal":
+                register_withdrawal(self.db, self.register_id, amount, reason, self.user.id)
+            elif mov_type == "expense":
+                register_expense(self.db, self.register_id, amount, reason, self.user.id)
+            elif mov_type == "usd_purchase":
+                rate = rate_input.value()
+                register_currency_purchase(self.db, self.register_id, "USD", amount, rate, self.user.id)
+            elif mov_type == "eur_purchase":
+                rate = rate_input.value()
+                register_currency_purchase(self.db, self.register_id, "EUR", amount, rate, self.user.id)
+            elif mov_type == "zelle":
+                register_zelle_purchase(self.db, self.register_id, amount, "", self.user.id)
+            elif mov_type == "remittance":
+                register_remittance(self.db, self.register_id, amount, reason, self.user.id)
+            QMessageBox.information(self, "Registrado", "Movimiento registrado correctamente.")
+            self.refresh_movements_table()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def refresh_movements_table(self):
+        today = date.today()
+        movements = get_daily_movements(self.db, self.register_id, today)
+        self.movements_table.setRowCount(len(movements))
+        for row, mov in enumerate(movements):
+            self.movements_table.setItem(row, 0, QTableWidgetItem(mov.date.strftime("%H:%M")))
+            self.movements_table.setItem(row, 1, QTableWidgetItem(mov.type))
+            self.movements_table.setItem(row, 2, QTableWidgetItem(f"{mov.amount:.2f}"))
+            self.movements_table.setItem(row, 3, QTableWidgetItem(mov.currency))
+            self.movements_table.setItem(row, 4, QTableWidgetItem(mov.description or ""))
+        if not movements:
+            self.movements_table.setRowCount(1)
+            self.movements_table.setSpan(0, 0, 1, 5)
+            self.movements_table.setItem(0, 0, QTableWidgetItem("No hay movimientos registrados hoy."))
+
+    # ------------------------------------------------------------
+    # Todos tus métodos originales (sin cambios)
+    # ------------------------------------------------------------
+    def set_category(self, category):
+        self.current_category = category
+        self.filter_products()
+
     def load_all_products(self):
         piso = self.db.query(StockLocation).filter(StockLocation.name == "Piso").first()
         if not piso:
@@ -186,35 +382,72 @@ class POSWindow(QWidget):
                 "category": product.category
             })
         self.filter_products()
-    
+
     def filter_products(self):
         search = self.search_input.text().strip().lower()
-        filtered = [p for p in self.all_products if search in p["name"].lower() or search in p["code"].lower()]
-        self.update_products_table(filtered)
-    
-    def update_products_table(self, products):
-        self.products_table.setRowCount(len(products))
-        for row, p in enumerate(products):
-            self.products_table.setItem(row, 0, QTableWidgetItem(p["code"]))
-            self.products_table.setItem(row, 1, QTableWidgetItem(p["name"]))
-            self.products_table.setItem(row, 2, QTableWidgetItem(f"{p['price']:.2f}"))
-            stock_item = QTableWidgetItem(str(p["quantity"]))
-            if p["quantity"] < 5:
-                stock_item.setBackground(QBrush(QColor(255, 255, 150)))
-            self.products_table.setItem(row, 3, stock_item)
-            self.products_table.setItem(row, 4, QTableWidgetItem(p["category"]))
-            self.products_table.setItem(row, 5, QTableWidgetItem(""))
-    
-    def add_selected_product(self):
-        row = self.products_table.currentRow()
-        if row < 0:
-            QMessageBox.information(self, "Selección", "Seleccione un producto de la lista.")
+        filtered = []
+        for p in self.all_products:
+            if self.current_category != "Todos" and p["category"] != self.current_category:
+                continue
+            if search and search not in p["name"].lower() and search not in p["code"].lower():
+                continue
+            filtered.append(p)
+        self.display_products_grid(filtered)
+
+    def display_products_grid(self, products):
+        for i in reversed(range(self.products_grid.count())):
+            widget = self.products_grid.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+        if not products:
+            label = QLabel("No hay productos disponibles en esta categoría.")
+            label.setAlignment(Qt.AlignCenter)
+            self.products_grid.addWidget(label, 0, 0, 1, 3)
             return
-        code = self.products_table.item(row, 0).text()
-        product = next((p for p in self.all_products if p["code"] == code), None)
-        if product:
-            self.show_quantity_dialog(product)
-    
+        row, col = 0, 0
+        for p in products:
+            card = QFrame()
+            card.setFrameShape(QFrame.StyledPanel)
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: white;
+                    border-radius: 12px;
+                    border: 1px solid #E0E0E0;
+                    padding: 8px;
+                }
+                QFrame:hover {
+                    background-color: #F0F4F8;
+                    border-color: #4A90E2;
+                }
+            """)
+            card.setFixedSize(200, 150)
+            card.setCursor(Qt.PointingHandCursor)
+            v_layout = QVBoxLayout(card)
+            v_layout.setSpacing(4)
+            name_label = QLabel(f"<b>{p['name']}</b>")
+            name_label.setWordWrap(True)
+            name_label.setStyleSheet("font-size: 13px;")
+            price_label = QLabel(f"Precio: <b>{p['price']:.2f} CUP</b>")
+            price_label.setStyleSheet("color: #2C3E50;")
+            stock_text = f"Stock: {p['quantity']}"
+            stock_label = QLabel(stock_text)
+            if p['quantity'] < 5:
+                stock_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+            else:
+                stock_label.setStyleSheet("color: #7F8C8D;")
+            v_layout.addWidget(name_label)
+            v_layout.addWidget(price_label)
+            v_layout.addWidget(stock_label)
+            v_layout.addStretch()
+            def make_handler(prod):
+                return lambda event: self.show_quantity_dialog(prod)
+            card.mousePressEvent = make_handler(p)
+            self.products_grid.addWidget(card, row, col)
+            col += 1
+            if col >= 3:
+                col = 0
+                row += 1
+
     def show_quantity_dialog(self, product):
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Agregar {product['name']}")
@@ -231,7 +464,7 @@ class POSWindow(QWidget):
         dialog.setLayout(layout)
         if dialog.exec() == QDialog.Accepted:
             self.add_to_cart(product, spin.value())
-    
+
     def add_to_cart(self, product, qty):
         for item in self.cart:
             if item["batch_id"] == product["batch_id"]:
@@ -254,7 +487,7 @@ class POSWindow(QWidget):
         })
         self.update_cart_table()
         self.update_total()
-    
+
     def update_cart_table(self):
         self.cart_table.setRowCount(len(self.cart))
         total_units = 0
@@ -264,19 +497,21 @@ class POSWindow(QWidget):
             self.cart_table.setItem(row, 2, QTableWidgetItem(f"{item['price']:.2f}"))
             self.cart_table.setItem(row, 3, QTableWidgetItem(f"{item['subtotal']:.2f}"))
             del_btn = QPushButton("❌")
+            del_btn.setStyleSheet("background-color: #E74C3C; border-radius: 4px; color: white;")
             del_btn.clicked.connect(lambda _, r=row: self.remove_from_cart(r))
             self.cart_table.setCellWidget(row, 4, del_btn)
             edit_btn = QPushButton("✏️")
+            edit_btn.setStyleSheet("background-color: #F39C12; border-radius: 4px; color: white;")
             edit_btn.clicked.connect(lambda _, r=row: self.edit_cart_item(r))
             self.cart_table.setCellWidget(row, 5, edit_btn)
             total_units += item["quantity"]
         self.item_count_label.setText(f"{len(self.cart)} items | {total_units} unidades")
-    
+
     def remove_from_cart(self, row):
         del self.cart[row]
         self.update_cart_table()
         self.update_total()
-    
+
     def edit_cart_item(self, row):
         item = self.cart[row]
         product = next((p for p in self.all_products if p["batch_id"] == item["batch_id"]), None)
@@ -305,17 +540,17 @@ class POSWindow(QWidget):
             item["subtotal"] = new_qty * item["price"]
             self.update_cart_table()
             self.update_total()
-    
+
     def clear_cart(self):
         if self.cart and QMessageBox.question(self, "Limpiar carrito", "¿Eliminar todos los productos del carrito?") == QMessageBox.Yes:
             self.cart.clear()
             self.update_cart_table()
             self.update_total()
-    
+
     def update_total(self):
         total = sum(item["subtotal"] for item in self.cart)
         self.total_label.setText(f"Total: {total:.2f} CUP")
-    
+
     def process_payment(self):
         if not self.cart:
             QMessageBox.information(self, "Carrito vacío", "No hay productos en el carrito.")
@@ -356,7 +591,7 @@ class POSWindow(QWidget):
                 return
             change = received - total
             QMessageBox.information(self, "Vuelto", f"Vuelto: {change:.2f} CUP")
-        reply = QMessageBox.question(self, "Confirmar venta", f"Total: {total:.2f} CUP\nMétodo: {method}\n¿Confirmar?")
+        reply = QMessageBox.question(self, "Confirmar venta", f"Total: {total:.2f} CUP\nMétodo: {method}\n¿Confirmar?", QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
         try:
@@ -377,7 +612,7 @@ class POSWindow(QWidget):
             )
             receipt_text = self.generate_receipt_text(sale_id, total, method, change, self.cart)
             self.show_receipt_dialog(receipt_text)
-            QMessageBox.information(self, "Venta exitosa", f"Venta registrada con ID {sale_id}\nTiquete enviado a impresora.")
+            QMessageBox.information(self, "Venta exitosa", f"Venta registrada con ID {sale_id}")
             self.cart.clear()
             self.update_cart_table()
             self.update_total()
@@ -385,13 +620,32 @@ class POSWindow(QWidget):
             self.update_sales_summary()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo registrar la venta: {str(e)}")
-    
+
+    def show_receipt_dialog(self, receipt_text):
+        from PySide6.QtWidgets import QTextEdit, QDialogButtonBox
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Ticket de venta")
+        dialog.setMinimumSize(400, 500)
+        layout = QVBoxLayout(dialog)
+        text_edit = QTextEdit()
+        text_edit.setPlainText(receipt_text)
+        text_edit.setReadOnly(True)
+        text_edit.setFontFamily("monospace")
+        layout.addWidget(text_edit)
+        button_box = QDialogButtonBox()
+        print_btn = button_box.addButton("Imprimir", QDialogButtonBox.AcceptRole)
+        close_btn = button_box.addButton("Cerrar", QDialogButtonBox.RejectRole)
+        button_box.accepted.connect(lambda: self.print_receipt(receipt_text) or dialog.accept())
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        dialog.exec()
+
     def generate_receipt_text(self, sale_id, total, method, change, items):
         settings = get_company_settings(self.db)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = []
         lines.append("=" * 32)
-        lines.append(f"{settings.company_name:^32}")
+        lines.append(f"{settings.company_name[:32]:^32}")
         if settings.nif:
             lines.append(f"NIF: {settings.nif}")
         if settings.phone:
@@ -419,7 +673,7 @@ class POSWindow(QWidget):
         lines.append(f"{settings.receipt_footer[:32]:^32}")
         lines.append("\n\n\n\n")
         return "\n".join(lines)
-        
+
     def print_receipt(self, receipt_text):
         if WIN32_PRINT_AVAILABLE:
             try:
@@ -443,7 +697,7 @@ class POSWindow(QWidget):
             os.unlink(temp_path)
         except Exception as e:
             print(f"Error guardando tiquete: {e}")
-    
+
     def update_sales_summary(self):
         today = date.today()
         first_day_month = date(today.year, today.month, 1)
